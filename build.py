@@ -2,59 +2,80 @@ import os
 import requests
 import zipfile
 
-requests.packages.urllib3.disable_warnings()
-r = requests.get("https://github.com/alacritty/alacritty/archive/refs/tags/"+requests.get("https://api.github.com/repos/alacritty/alacritty/releases/latest", verify=False).json()["tag_name"]+".zip", stream=True, verify=False)
 
-with open("./alacritty.zip", "wb") as f:
-    for chunk in r.iter_content(chunk_size=512):
-        f.write(chunk)
+def download():
+    requests.packages.urllib3.disable_warnings()
+    r = requests.get(
+        "https://github.com/alacritty/alacritty/archive/refs/tags/"
+        + requests.get(
+            "https://api.github.com/repos/alacritty/alacritty/releases/latest",
+            verify=False,
+        ).json()["tag_name"]
+        + ".zip",
+        stream=True,
+        verify=False,
+    )
 
-zip_file = zipfile.ZipFile("./alacritty.zip")
+    with open("./alacritty.zip", "wb") as f:
+        for chunk in r.iter_content(chunk_size=512):
+            f.write(chunk)
 
-for names in zip_file.namelist():
-    zip_file.extract(names, "./")
-zip_file.close()
+    zip_file = zipfile.ZipFile("./alacritty.zip")
 
-os.remove('./alacritty.zip')
-os.rename('alacritty-'+requests.get("https://api.github.com/repos/alacritty/alacritty/releases/latest", verify=False).json()["tag_name"][1:], 'alacritty')
+    for names in zip_file.namelist():
+        zip_file.extract(names, "./")
+    zip_file.close()
+
+    os.remove("./alacritty.zip")
+    os.rename(
+        "alacritty-"
+        + requests.get(
+            "https://api.github.com/repos/alacritty/alacritty/releases/latest",
+            verify=False,
+        ).json()["tag_name"][1:],
+        "alacritty",
+    )
 
 
-with open('./alacritty/alacritty/src/config/mod.rs', 'r') as f:
-    mod = f.readlines()
+def rewrite():
+    with open("./alacritty/alacritty/src/config/mod.rs", "r") as f:
+        mod = f.readlines()
 
-# mod = [mod[i][:-1] for i in range(len(mod))]
+    mod = (
+        mod[: mod.index("#[cfg(windows)]\n") + 1]
+        + [
+            "fn installed_config() -> Option<PathBuf> {\n",
+            '    let fallback = env::current_dir().expect("REASON")'+
+            '.join("alacritty.yml");\n',
+            "    if fallback.exists() {\n",
+            "        Some(fallback)\n",
+            "    } else {\n",
+            "        None\n",
+            "    }\n",
+            "}\n",
+        ]
+        + mod[
+            mod[mod.index("#[cfg(windows)]\n"):].index("}\n")
+            + mod.index("#[cfg(windows)]\n") + 1:
+        ]
+    )
 
-start = 0
-while start < len(mod):
-    if mod[start] == '#[cfg(windows)]\n':
-        break
-    start += 1
-else:
-    raise Exception("''#[cfg(windows)]' not fond.")
+    with open("./alacritty/alacritty/src/config/mod.rs", "w") as f:
+        for line in mod:
+            f.write(line)
 
-end = start
-while end < len(mod):
-    if mod[end] == '}\n':
-        break
-    end += 1
 
-new_code = [
-    'fn installed_config() -> Option<PathBuf> {\n',
-    '    let fallback = env::current_dir().expect("REASON").join("alacritty.yml");\n',
-    '    if fallback.exists() {\n',
-    '        Some(fallback)\n',
-    '    } else {\n',
-    '        None\n',
-    '    }\n',
-    '}\n'
-]
+def build():
+    os.system("cd alacritty & cargo build --release")
+    os.rename("./alacritty/target/release/alacritty.exe", "./alacritty.exe")
+    os.system('powershell -Command "rm -r alacritty"')
 
-mod = mod[:start + 1] + new_code + mod[end + 1:]
 
-with open('./alacritty/alacritty/src/config/mod.rs', 'w') as f:
-    for line in mod:
-        f.write(line)
+def main():
+    download()
+    rewrite()
+    build()
 
-os.system('cd alacritty & cargo build --release')
-os.rename('./alacritty/target/release/alacritty.exe', './alacritty.exe')
-os.system('powershell -Command "rm -r alacritty"')
+
+if __name__ == "__main__":
+    main()
